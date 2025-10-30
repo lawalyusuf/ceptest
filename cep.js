@@ -294,27 +294,39 @@
       paymentModalState.pollInterval = setInterval(async function () {
         try {
           const statusData = await handlePaymentStatus(transactionRef);
-          const status = statusData.status; // Get the status string
+          const { status, amount, transactionReference } = statusData;
+
           console.log(`CeptaPay Status Check: ${status}`);
 
-          // Successful poll: reset error counter
+          // Reset error counter on successful response
           paymentModalState.consecutiveErrorCount = 0;
 
-          // Check for final statuses: Paid or Failed
-          if (status === "Successful") {
-            triggerCallbackAndClose(statusData.transactionRef, "success");
-          } else if (status === "Failed") {
-            triggerCallbackAndClose(statusData.transactionRef, "failed");
+          // Check for successful & failed payment
+          const isSuccessful =
+            status === "Successful" &&
+            amount > 0 &&
+            transactionReference !== null;
+
+          const isFailed =
+            status === "Failed" && amount > 0 && transactionReference !== null;
+
+          if (isSuccessful) {
+            triggerCallbackAndClose(transactionReference, "success");
+            return; // stop further checks
+          }
+
+          if (isFailed) {
+            triggerCallbackAndClose(transactionReference, "failed");
+            return;
           }
         } catch (error) {
           paymentModalState.consecutiveErrorCount++;
-
           console.error(
             `CeptaPay: Status polling failed (Attempt ${paymentModalState.consecutiveErrorCount}/${paymentModalState.MAX_POLLING_ERRORS}). Error:`,
             error.message
           );
 
-          // Only stop polling and fail if we hit the maximum consecutive errors
+          // Stop polling and report failure if max retries reached
           if (
             paymentModalState.consecutiveErrorCount >=
             paymentModalState.MAX_POLLING_ERRORS
