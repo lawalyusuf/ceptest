@@ -315,15 +315,12 @@
           // Check for success
           const isSuccessful =
             status === "Successful" &&
-            typeof amount === "number" &&
             amount > 0 &&
             transactionReference !== null;
 
           // Check for failure (explicit failed OR invalid/missing fields)
           const isFailed =
-            status === "Failed" ||
-            amount === 0 ||
-            transactionReference === null;
+            status === "Failed" && amount > 0 && transactionReference === null;
 
           // Use best available ref to report to callbacks
           const callbackRef =
