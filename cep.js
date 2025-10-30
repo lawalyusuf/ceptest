@@ -1,10 +1,11 @@
 (function (window) {
   "use strict";
+
   let paymentModalState = {
     transactionRef: null,
     pollInterval: null,
     consecutiveErrorCount: 0,
-    MAX_POLLING_ERRORS: 10, //todo
+    MAX_POLLING_ERRORS: 10, // TODO: Adjust as needed
     onClose: null,
     onSuccess: null,
     onFailed: null,
@@ -29,18 +30,15 @@
     }
 
     const ts = Math.floor(Date.now() / 1000);
-    let payloadBody = "";
-
-    if (data && method === "POST") {
-      payloadBody = JSON.stringify(data);
-    }
-
+    let payloadBody = data && method === "POST" ? JSON.stringify(data) : "";
     const signatureString = ts + method + pathForSignature + payloadBody;
 
-    const secretKeyBytes = textToUint8Array(paymentModalState.config.secretKey);
-    const dataBytes = textToUint8Array(signatureString);
-
     try {
+      const secretKeyBytes = textToUint8Array(
+        paymentModalState.config.secretKey
+      );
+      const dataBytes = textToUint8Array(signatureString);
+
       const key = await crypto.subtle.importKey(
         "raw",
         secretKeyBytes,
@@ -50,7 +48,6 @@
       );
 
       const signatureBuffer = await crypto.subtle.sign("HMAC", key, dataBytes);
-
       const signature = Array.from(new Uint8Array(signatureBuffer))
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("");
@@ -90,14 +87,8 @@
       "Content-Type": "application/json",
     };
 
-    const config = {
-      method: method,
-      headers: headers,
-    };
-
-    if (data && method === "POST") {
-      config.body = JSON.stringify(data);
-    }
+    const config = { method, headers };
+    if (data && method === "POST") config.body = JSON.stringify(data);
 
     try {
       const response = await fetch(url, config);
@@ -107,9 +98,7 @@
         const errorMessage =
           result.message ||
           `API error: ${response.status} ${response.statusText}`;
-
         console.error("API Response Error Details:", result);
-
         const error = new Error(errorMessage);
         error.status = response.status;
         throw error;
@@ -134,6 +123,7 @@
 
     if (response.data && paymentModalState.transactionRef === transactionRef) {
       const status = response.data.status;
+
       if (status === "Successful") {
         triggerCallbackAndClose(response.data.transactionRef, "success");
       } else if (status === "Failed") {
@@ -164,7 +154,6 @@
       clearInterval(paymentModalState.pollInterval);
     }
     paymentModalState.pollInterval = null;
-
     removeModal();
 
     switch (eventType) {
@@ -187,50 +176,43 @@
 
   function createModal(paymentUrl, transactionRef) {
     removeModal();
+
     const modalContainer = document.createElement("div");
     modalContainer.id = "ceptaPay_myModal";
     modalContainer.className = "cepta-modal";
     modalContainer.style.cssText = `
-            display: flex; position: fixed; z-index: 9999; left: 0; top: 0;
-            width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.6);
-            backdrop-filter: blur(4px); justify-content: center; align-items: center;
-        `;
+      display: flex; position: fixed; z-index: 9999; left: 0; top: 0;
+      width: 100%; height: 100%; overflow: auto; 
+      background-color: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+      justify-content: center; align-items: center;
+    `;
 
     modalContainer.addEventListener("click", (event) => {
       if (event.target === modalContainer) {
         triggerCallbackAndClose(transactionRef, "close");
       }
     });
+
     window.addEventListener("keydown", handleKeydownClose);
 
     const modalContentWrapper = document.createElement("div");
     modalContentWrapper.className = "cepta-modal-content-wrapper";
     modalContentWrapper.style.cssText = `
-            position: relative;
-            width: 95%; max-width: 480px;
-            height: 680px; /* FIXED HEIGHT TO ENSURE IFRAME RENDERS */
-            background-color: #fff;
-            border-radius: 12px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.4);
-            overflow: hidden; /* Important for clean edges */
-        `;
+      position: relative; width: 95%; max-width: 480px; height: 680px;
+      background-color: #fff; border-radius: 12px; 
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4); overflow: hidden;
+    `;
 
     const closeBtn = document.createElement("span");
     closeBtn.innerHTML = "&times;";
     closeBtn.className = "cepta-close-btn";
     closeBtn.style.cssText = `
-            position: absolute; right: 10px; top: 0px;
-            color: #4b5563; font-size: 2.2rem; font-weight: bold; cursor: pointer; line-height: 1;
-            z-index: 10000; padding: 10px;
-            transition: color 0.15s;
-        `;
-    closeBtn.onmouseover = function () {
-      this.style.color = "#1f2937";
-    };
-    closeBtn.onmouseout = function () {
-      this.style.color = "#4b5563";
-    };
-
+      position: absolute; right: 10px; top: 0px; color: #4b5563;
+      font-size: 2.2rem; font-weight: bold; cursor: pointer;
+      z-index: 10000; padding: 10px; transition: color 0.15s;
+    `;
+    closeBtn.onmouseover = () => (closeBtn.style.color = "#1f2937");
+    closeBtn.onmouseout = () => (closeBtn.style.color = "#4b5563");
     closeBtn.addEventListener("click", () => {
       triggerCallbackAndClose(transactionRef, "close");
     });
@@ -266,6 +248,7 @@
     if (paymentModalState.pollInterval) {
       clearInterval(paymentModalState.pollInterval);
     }
+
     paymentModalState.onSuccess = onSuccess;
     paymentModalState.onFailed = onFailed;
     paymentModalState.onClose = onClose;
@@ -273,7 +256,6 @@
 
     try {
       console.log("CeptaPay: Initiating payment...");
-
       const responseData = await handleInitiateApiData(paymentData);
 
       const transactionRef = responseData.transactionRef;
@@ -286,11 +268,12 @@
       }
 
       paymentModalState.transactionRef = transactionRef;
-
       createModal(paymentUrl, transactionRef);
+
       console.log(
-        `CeptaPay: Modal opened for transactionRef: ${transactionRef}. Automatic status polling is disabled.`
+        `CeptaPay: Modal opened for transactionRef: ${transactionRef}. Automatic status polling enabled.`
       );
+
       paymentModalState.pollInterval = setInterval(async function () {
         try {
           const statusData = await handlePaymentStatus(transactionRef);
@@ -298,10 +281,9 @@
 
           console.log(`CeptaPay Status Check: ${status}`);
 
-          // Reset error counter on successful response
+          // Reset error counter on valid response
           paymentModalState.consecutiveErrorCount = 0;
 
-          // Check for successful & failed payment
           const isSuccessful =
             status === "Successful" &&
             amount > 0 &&
@@ -312,13 +294,15 @@
 
           if (isSuccessful) {
             triggerCallbackAndClose(transactionReference, "success");
-            return; // stop further checks
+            return;
           }
 
           if (isFailed) {
             triggerCallbackAndClose(transactionReference, "failed");
             return;
           }
+
+          // Continue polling for pending/processing
         } catch (error) {
           paymentModalState.consecutiveErrorCount++;
           console.error(
@@ -326,7 +310,6 @@
             error.message
           );
 
-          // Stop polling and report failure if max retries reached
           if (
             paymentModalState.consecutiveErrorCount >=
             paymentModalState.MAX_POLLING_ERRORS
@@ -337,7 +320,7 @@
             triggerCallbackAndClose(transactionRef, "failed");
           }
         }
-      }, 3000); // Poll every 3 seconds
+      }, 3000);
     } catch (error) {
       console.error("CeptaPay: Payment initiation failed:", error.message);
       if (onFailed) onFailed(paymentData.transactionReference || "unknown_ref");
@@ -346,7 +329,7 @@
   }
 
   window.CeptaPay = {
-    checkout: checkout,
+    checkout,
     confirmStatus: handlePaymentStatus,
   };
 })(window);
