@@ -2,6 +2,9 @@
   "use strict";
   let paymentModalState = {
     transactionRef: null,
+    pollInterval: null,
+    consecutiveErrorCount: 0,
+    MAX_POLLING_ERRORS: 10, //todo
     onClose: null,
     onSuccess: null,
     onFailed: null,
@@ -131,7 +134,7 @@
 
     if (response.data && paymentModalState.transactionRef === transactionRef) {
       const status = response.data.status;
-      if (status === "Paid") {
+      if (status === "Successful") {
         triggerCallbackAndClose(response.data.transactionRef, "success");
       } else if (status === "Failed") {
         triggerCallbackAndClose(response.data.transactionRef, "failed");
@@ -188,7 +191,7 @@
     modalContainer.id = "ceptaPay_myModal";
     modalContainer.className = "cepta-modal";
     modalContainer.style.cssText = `
-            display: flex; position: fixed; z-index: 9999; left: 0; top: 0; 
+            display: flex; position: fixed; z-index: 9999; left: 0; top: 0;
             width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.6);
             backdrop-filter: blur(4px); justify-content: center; align-items: center;
         `;
@@ -203,11 +206,11 @@
     const modalContentWrapper = document.createElement("div");
     modalContentWrapper.className = "cepta-modal-content-wrapper";
     modalContentWrapper.style.cssText = `
-            position: relative; 
-            width: 95%; max-width: 480px; 
+            position: relative;
+            width: 95%; max-width: 480px;
             height: 680px; /* FIXED HEIGHT TO ENSURE IFRAME RENDERS */
-            background-color: #fff; 
-            border-radius: 12px; 
+            background-color: #fff;
+            border-radius: 12px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.4);
             overflow: hidden; /* Important for clean edges */
         `;
@@ -216,8 +219,8 @@
     closeBtn.innerHTML = "&times;";
     closeBtn.className = "cepta-close-btn";
     closeBtn.style.cssText = `
-            position: absolute; right: 10px; top: 0px; 
-            color: #4b5563; font-size: 2.2rem; font-weight: bold; cursor: pointer; line-height: 1; 
+            position: absolute; right: 10px; top: 0px;
+            color: #4b5563; font-size: 2.2rem; font-weight: bold; cursor: pointer; line-height: 1;
             z-index: 10000; padding: 10px;
             transition: color 0.15s;
         `;
@@ -288,6 +291,41 @@
       console.log(
         `CeptaPay: Modal opened for transactionRef: ${transactionRef}. Automatic status polling is disabled.`
       );
+      paymentModalState.pollInterval = setInterval(async function () {
+        try {
+          const statusData = await handlePaymentStatus(transactionRef);
+          const status = statusData.status; // Get the status string
+          console.log(`CeptaPay Status Check: ${status}`);
+
+          // Successful poll: reset error counter
+          paymentModalState.consecutiveErrorCount = 0;
+
+          // Check for final statuses: Paid or Failed
+          if (status === "Successful") {
+            triggerCallbackAndClose(statusData.transactionRef, "success");
+          } else if (status === "Failed") {
+            triggerCallbackAndClose(statusData.transactionRef, "failed");
+          }
+        } catch (error) {
+          paymentModalState.consecutiveErrorCount++;
+
+          console.error(
+            `CeptaPay: Status polling failed (Attempt ${paymentModalState.consecutiveErrorCount}/${paymentModalState.MAX_POLLING_ERRORS}). Error:`,
+            error.message
+          );
+
+          // Only stop polling and fail if we hit the maximum consecutive errors
+          if (
+            paymentModalState.consecutiveErrorCount >=
+            paymentModalState.MAX_POLLING_ERRORS
+          ) {
+            console.error(
+              "CeptaPay: Maximum polling errors reached. Stopping check and reporting failure."
+            );
+            triggerCallbackAndClose(transactionRef, "failed");
+          }
+        }
+      }, 3000); // Poll every 3 seconds
     } catch (error) {
       console.error("CeptaPay: Payment initiation failed:", error.message);
       if (onFailed) onFailed(paymentData.transactionReference || "unknown_ref");
