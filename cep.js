@@ -1,22 +1,14 @@
-/**
- * CeptaPay UI SDK (Inline Pop-up Checkout) - MODIFIED FOR SECURE AJAX
- * This script handles modal UI only. All API calls (Initiate, Status Check)
- * are proxied securely through the WordPress backend.
- */
 (function (window) {
   "use strict";
-
-  // --- 1. CONFIGURATION & STATE ---
   let paymentModalState = {
     transactionRef: null,
     onClose: null,
     onSuccess: null,
     onFailed: null,
-    // The client only needs the public key and base URL
     config: {
       publicKey: null,
+      secretKey: null,
       baseUrl: null,
-      ajaxUrl: null, // NEW: WordPress AJAX endpoint URL
     },
     ui: {
       modalContainer: null,
@@ -24,89 +16,132 @@
     },
   };
 
-  // --- 2. AJAX CALLER (REPLACING API CALLER) ---
+  function textToUint8Array(text) {
+    return new TextEncoder().encode(text);
+  }
 
-  /**
-   * Proxies the API request to the secure WordPress PHP backend.
-   * @param {string} action - The WordPress AJAX action (e.g., 'ceptapay_initiate').
-   * @param {object} data - The data to send to the server.
-   * @returns {Promise<object>}
-   */
-  async function ajaxCall(action, data) {
-    if (!paymentModalState.config.ajaxUrl) {
-      throw new Error("SDK Error: WordPress AJAX URL is missing.");
+  async function createSignature(method, pathForSignature, data = null) {
+    if (!paymentModalState.config.secretKey) {
+      throw new Error("SDK Error: Secret key is missing from configuration.");
     }
 
-    const formData = new FormData();
-    formData.append("action", action);
-    formData.append("data", JSON.stringify(data));
-    formData.append("public_key", paymentModalState.config.publicKey);
+    const ts = Math.floor(Date.now() / 1000);
+    let payloadBody = "";
 
-    // Security Note: nonce must be handled on the main page where the script is enqueued.
-    // For simplicity here, we assume it's added separately or handled by the parent caller.
+    if (data && method === "POST") {
+      payloadBody = JSON.stringify(data);
+    }
+
+    const signatureString = ts + method + pathForSignature + payloadBody;
+
+    const secretKeyBytes = textToUint8Array(paymentModalState.config.secretKey);
+    const dataBytes = textToUint8Array(signatureString);
 
     try {
-      const response = await fetch(paymentModalState.config.ajaxUrl, {
-        method: "POST",
-        body: formData,
-      });
+      const key = await crypto.subtle.importKey(
+        "raw",
+        secretKeyBytes,
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"]
+      );
 
-      if (!response.ok) {
-        throw new Error(`AJAX request failed with status: ${response.status}`);
-      }
+      const signatureBuffer = await crypto.subtle.sign("HMAC", key, dataBytes);
 
+      const signature = Array.from(new Uint8Array(signatureBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+
+      return { ts, signature };
+    } catch (e) {
+      console.error("HMAC signature generation failed:", e);
+      throw new Error("Authentication failure during signature creation.");
+    }
+  }
+
+  async function apiCall(method, fullPath, data = null) {
+    if (
+      !paymentModalState.config.baseUrl ||
+      !paymentModalState.config.publicKey
+    ) {
+      throw new Error(
+        "SDK Error: Base URL or Public Key is missing from configuration."
+      );
+    }
+
+    let pathForSignature = fullPath.split("?")[0];
+    console.log(`[API Call] Signing path: ${pathForSignature}`);
+
+    const { ts, signature } = await createSignature(
+      method,
+      pathForSignature,
+      data
+    );
+    const url = paymentModalState.config.baseUrl + fullPath;
+
+    const headers = {
+      Accept: "application/json",
+      "X-Access-Key": paymentModalState.config.publicKey,
+      "X-Access-Ts": ts,
+      "X-Access-Signature": signature,
+      "Content-Type": "application/json",
+    };
+
+    const config = {
+      method: method,
+      headers: headers,
+    };
+
+    if (data && method === "POST") {
+      config.body = JSON.stringify(data);
+    }
+
+    try {
+      const response = await fetch(url, config);
       const result = await response.json();
 
-      if (result.success === false) {
-        throw new Error(
-          result.data.message || "Payment initiation failed via AJAX."
-        );
+      if (!response.ok) {
+        const errorMessage =
+          result.message ||
+          `API error: ${response.status} ${response.statusText}`;
+
+        console.error("API Response Error Details:", result);
+
+        const error = new Error(errorMessage);
+        error.status = response.status;
+        throw error;
       }
 
-      return result.data; // The API response data from the PHP proxy
+      return result;
     } catch (error) {
-      console.error("AJAX Fetch Error:", error);
+      console.error("Fetch API Error:", error);
       throw error;
     }
   }
 
-  async function handleInitiatePayment(paymentData) {
-    // Calls the PHP AJAX hook to perform the secure HMAC POST request
-    return ajaxCall("ceptapay_initiate_payment", { paymentData });
+  async function handleInitiateApiData(paymentData) {
+    const path = "/api/v1/pay";
+    const response = await apiCall("POST", path, paymentData);
+    return response.data;
   }
 
-  /**
-   * Confirms the payment status of a given transaction reference using the PHP proxy.
-   * @param {string} transactionRef
-   * @returns {Promise<object>} Status data from the API.
-   */
   async function handlePaymentStatus(transactionRef) {
-    // Calls the PHP AJAX hook to perform the secure HMAC GET request
-    const statusData = await ajaxCall("ceptapay_confirm_status", {
-      transactionRef,
-    });
+    const path = `/api/v1/pay/confirm-status?TransactionRef=${transactionRef}`;
+    const response = await apiCall("GET", path, null);
 
-    // Check for final statuses and automatically close the modal if terminal
-    if (statusData && paymentModalState.transactionRef === transactionRef) {
-      const status = statusData.status;
+    if (response.data && paymentModalState.transactionRef === transactionRef) {
+      const status = response.data.status;
       if (status === "Paid") {
-        triggerCallbackAndClose(statusData.transactionRef, "success");
+        triggerCallbackAndClose(response.data.transactionRef, "success");
       } else if (status === "Failed") {
-        triggerCallbackAndClose(statusData.transactionRef, "failed");
+        triggerCallbackAndClose(response.data.transactionRef, "failed");
       }
     }
 
-    return statusData;
+    return response.data;
   }
 
-  // --- 3. MODAL/UI HANDLER (KEEPING EXISTING LOGIC) ---
-  // (Functions: removeModal, handleKeydownClose, triggerCallbackAndClose, createModal)
-  // *** COPY YOUR EXISTING MODAL/UI HANDLER FUNCTIONS HERE (SECTION 4) ***
-
-  // ... (Your existing functions: removeModal, handleKeydownClose, triggerCallbackAndClose, createModal)
-
   function removeModal() {
-    // ... (existing code for removeModal)
     if (paymentModalState.ui.modalContainer) {
       window.removeEventListener("keydown", handleKeydownClose);
       paymentModalState.ui.modalContainer.remove();
@@ -114,15 +149,19 @@
       paymentModalState.ui.iframe = null;
     }
   }
+
   function handleKeydownClose(event) {
-    // ... (existing code for handleKeydownClose)
     if (event.key === "Escape" && paymentModalState.transactionRef) {
       triggerCallbackAndClose(paymentModalState.transactionRef, "close");
     }
   }
+
   function triggerCallbackAndClose(transactionRef, eventType) {
-    // ... (existing code for triggerCallbackAndClose)
-    // ... (Your existing triggerCallbackAndClose function content)
+    if (paymentModalState.pollInterval) {
+      clearInterval(paymentModalState.pollInterval);
+    }
+    paymentModalState.pollInterval = null;
+
     removeModal();
 
     switch (eventType) {
@@ -142,34 +181,27 @@
 
     paymentModalState.transactionRef = null;
   }
-  function createModal(paymentUrl, transactionRef) {
-    // ... (existing code for createModal)
-    removeModal(); // Ensure no existing modal is present
 
-    // 1. Full-screen backdrop container
+  function createModal(paymentUrl, transactionRef) {
+    removeModal();
     const modalContainer = document.createElement("div");
     modalContainer.id = "ceptaPay_myModal";
     modalContainer.className = "cepta-modal";
-    // Full screen, centered, dark backdrop
     modalContainer.style.cssText = `
             display: flex; position: fixed; z-index: 9999; left: 0; top: 0; 
             width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.6);
             backdrop-filter: blur(4px); justify-content: center; align-items: center;
         `;
 
-    // Allow closing by clicking the backdrop
     modalContainer.addEventListener("click", (event) => {
       if (event.target === modalContainer) {
         triggerCallbackAndClose(transactionRef, "close");
       }
     });
-    // Allow closing with Escape key
     window.addEventListener("keydown", handleKeydownClose);
 
-    // 2. Modal content wrapper (the visible box)
     const modalContentWrapper = document.createElement("div");
     modalContentWrapper.className = "cepta-modal-content-wrapper";
-    // Set explicit, manageable dimensions for the container
     modalContentWrapper.style.cssText = `
             position: relative; 
             width: 95%; max-width: 480px; 
@@ -180,11 +212,9 @@
             overflow: hidden; /* Important for clean edges */
         `;
 
-    // 3. Close Button
     const closeBtn = document.createElement("span");
     closeBtn.innerHTML = "&times;";
     closeBtn.className = "cepta-close-btn";
-    // Position the button absolutely over the content wrapper
     closeBtn.style.cssText = `
             position: absolute; right: 10px; top: 0px; 
             color: #4b5563; font-size: 2.2rem; font-weight: bold; cursor: pointer; line-height: 1; 
@@ -202,7 +232,6 @@
       triggerCallbackAndClose(transactionRef, "close");
     });
 
-    // 4. The Iframe
     const iframe = document.createElement("iframe");
     iframe.className = "cepta-pg-iframe";
     iframe.style.cssText =
@@ -210,9 +239,8 @@
     iframe.src = paymentUrl;
     iframe.allow = "clipboard-read; clipboard-write";
 
-    // Assemble the modal
     modalContentWrapper.appendChild(iframe);
-    modalContentWrapper.appendChild(closeBtn); // Close button is layered on top
+    modalContentWrapper.appendChild(closeBtn);
     modalContainer.appendChild(modalContentWrapper);
     document.body.appendChild(modalContainer);
 
@@ -220,44 +248,30 @@
     paymentModalState.ui.iframe = iframe;
   }
 
-  // --- 4. MAIN PUBLIC API ---
-
-  /**
-   * Initiates the Cepta payment process.
-   * @param {{
-   * paymentData: object,
-   * config: { publicKey: string, baseUrl: string, ajaxUrl: string }, // NOTE: secretKey is removed
-   * onSuccess: function(string),
-   * onFailed: function(string),
-   * onClose: function(string)
-   * }} params - Configuration parameters and callbacks.
-   */
   async function checkout(params) {
     const { paymentData, config, onSuccess, onFailed, onClose } = params;
 
-    // Basic validation (secretKey is no longer required on the client)
-    if (!config || !config.publicKey || !config.baseUrl || !config.ajaxUrl) {
+    if (!config || !config.publicKey || !config.secretKey || !config.baseUrl) {
       console.error(
-        "CeptaPay: Missing required configuration keys (publicKey, baseUrl, or ajaxUrl)."
+        "CeptaPay: Missing required configuration keys (publicKey, secretKey, or baseUrl)."
       );
       if (onFailed)
         onFailed(paymentData?.transactionReference || "unknown_ref");
       return;
     }
 
-    // Clear any existing state and store new state
+    if (paymentModalState.pollInterval) {
+      clearInterval(paymentModalState.pollInterval);
+    }
     paymentModalState.onSuccess = onSuccess;
     paymentModalState.onFailed = onFailed;
     paymentModalState.onClose = onClose;
-
-    // Store the dynamic config (without secretKey)
     paymentModalState.config = config;
 
     try {
-      console.log("CeptaPay: Initiating payment via secure PHP proxy...");
+      console.log("CeptaPay: Initiating payment...");
 
-      // 1. Initiate Payment (Happens securely on the server via AJAX)
-      const responseData = await handleInitiatePayment(paymentData);
+      const responseData = await handleInitiateApiData(paymentData);
 
       const transactionRef = responseData.transactionRef;
       const paymentUrl = responseData.paymentUrl || responseData.url;
@@ -270,23 +284,19 @@
 
       paymentModalState.transactionRef = transactionRef;
 
-      // 2. Open Modal
       createModal(paymentUrl, transactionRef);
       console.log(
-        `CeptaPay: Modal opened for transactionRef: ${transactionRef}.`
+        `CeptaPay: Modal opened for transactionRef: ${transactionRef}. Automatic status polling is disabled.`
       );
     } catch (error) {
       console.error("CeptaPay: Payment initiation failed:", error.message);
-      // If initiation fails, call the failed callback immediately without opening modal
       if (onFailed) onFailed(paymentData.transactionReference || "unknown_ref");
       removeModal();
     }
   }
 
-  // Expose the SDK to the global window object
   window.CeptaPay = {
     checkout: checkout,
-    // The manual status check function remains exposed
     confirmStatus: handlePaymentStatus,
   };
 })(window);
