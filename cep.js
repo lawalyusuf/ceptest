@@ -3,9 +3,7 @@
 
   let paymentModalState = {
     transactionRef: null,
-    // pollInterval: null,
-    // consecutiveErrorCount: 0,
-    // MAX_POLLING_ERRORS: 10, //todo
+    pollInterval: null, //kepp for SDK-side polling if needed
     onClose: null,
     onSuccess: null,
     onFailed: null,
@@ -133,16 +131,7 @@
     const path = `/api/v1/pay/confirm-status?TransactionRef=${transactionRef}`;
     const response = await apiCall("GET", path, null);
 
-    if (response.data && paymentModalState.transactionRef === transactionRef) {
-      const status = response.data.status;
-      if (status === "Successful") {
-        triggerCallbackAndClose(response.data.transactionRef, "success");
-      } else if (status === "Failed") {
-        triggerCallbackAndClose(response.data.transactionRef, "failed");
-      }
-    }
-
-    return response.data;
+    return response.data?.data || response.data;
   }
 
   function removeModal() {
@@ -161,7 +150,7 @@
   }
 
   function triggerCallbackAndClose(transactionRef, eventType) {
-    // clear polling
+    // clear polling (prevents the interval from running another check after final status)
     if (paymentModalState.pollInterval) {
       clearInterval(paymentModalState.pollInterval);
     }
@@ -297,70 +286,11 @@
 
       createModal(paymentUrl, transactionRef);
       console.log(
-        `CeptaPay: Modal opened for transactionRef: ${transactionRef}. Automatic status polling enabled.`
+        `CeptaPay: Modal opened for transactionRef: ${transactionRef}.`
       );
 
-      // Polling loop
-      // paymentModalState.pollInterval = setInterval(async function () {
-      //   try {
-      //     const statusData = (await handlePaymentStatus(transactionRef)) || {};
-      //     const { status, amount, transactionReference } = statusData;
-
-      //     console.log(`CeptaPay Status Check: ${status}`);
-
-      //     // Reset error counter on valid response
-      //     paymentModalState.consecutiveErrorCount = 0;
-
-      //     // Check for success
-      //     const isSuccessful =
-      //       status === "Successful" &&
-      //       amount > 0 &&
-      //       transactionReference !== null;
-
-      //     // Check for failure (explicit failed OR invalid/missing fields)
-      //     const isFailed =
-      //       status === "Failed" && amount > 0 && transactionReference === null;
-
-      //     // Use best available ref to report to callbacks
-      //     const callbackRef =
-      //       transactionReference ||
-      //       paymentModalState.transactionRef ||
-      //       transactionRef;
-
-      //     if (isSuccessful) {
-      //       triggerCallbackAndClose(callbackRef, "success");
-      //       return; // stop further checks
-      //     }
-
-      //     if (isFailed) {
-      //       triggerCallbackAndClose(callbackRef, "failed");
-      //       return; // stop further checks
-      //     }
-
-      //     // otherwise continue polling (Pending/Processing/unknown)
-      //   } catch (error) {
-      //     paymentModalState.consecutiveErrorCount++;
-      //     console.error(
-      //       `CeptaPay: Status polling failed (Attempt ${paymentModalState.consecutiveErrorCount}/${paymentModalState.MAX_POLLING_ERRORS}). Error:`,
-      //       error.message
-      //     );
-
-      //     // Stop polling and report failure if max retries reached
-      //     if (
-      //       paymentModalState.consecutiveErrorCount >=
-      //       paymentModalState.MAX_POLLING_ERRORS
-      //     ) {
-      //       console.error(
-      //         "CeptaPay: Maximum polling errors reached. Stopping check and reporting failure."
-      //       );
-      //       const fallbackRef =
-      //         paymentModalState.transactionRef ||
-      //         paymentData?.transactionReference ||
-      //         "unknown_ref";
-      //       triggerCallbackAndClose(fallbackRef, "failed");
-      //     }
-      //   }
-      // }, 3000); // Poll every 3 seconds
+      // Polling is now expected to be handled by the client-side code
+      // (the HTML <script> block) using the exposed confirmStatus function.
     } catch (error) {
       console.error("CeptaPay: Payment initiation failed:", error.message);
       const fallbackRef =
@@ -375,5 +305,7 @@
   window.CeptaPay = {
     checkout: checkout,
     confirmStatus: handlePaymentStatus,
+    closeModal: () =>
+      triggerCallbackAndClose(paymentModalState.transactionRef, "close"),
   };
 })(window);
