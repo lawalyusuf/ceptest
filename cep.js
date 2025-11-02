@@ -3,7 +3,6 @@
 
   let paymentModalState = {
     transactionRef: null,
-    pollInterval: null, //kepp for SDK-side polling if needed
     onClose: null,
     onSuccess: null,
     onFailed: null,
@@ -87,11 +86,14 @@
       "X-Access-Ts": ts,
       "X-Access-Signature": signature,
       "Content-Type": "application/json",
+      "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate",
+      Pragma: "no-cache",
     };
 
     const config = {
       method: method,
       headers: headers,
+      cache: "no-store",
     };
 
     if (data && method === "POST") {
@@ -128,10 +130,11 @@
   }
 
   async function handlePaymentStatus(transactionRef) {
-    const path = `/api/v1/pay/confirm-status?TransactionRef=${transactionRef}`;
+    const path = `/api/v1/pay/confirm-status?TransactionRef=${encodeURIComponent(
+      transactionRef
+    )}&_t=${Date.now()}`; // cache-buster
     const response = await apiCall("GET", path, null);
-
-    return response.data?.data || response.data;
+    return response;
   }
 
   function removeModal() {
@@ -150,7 +153,7 @@
   }
 
   function triggerCallbackAndClose(transactionRef, eventType) {
-    // clear polling (prevents the interval from running another check after final status)
+    // clear polling
     if (paymentModalState.pollInterval) {
       clearInterval(paymentModalState.pollInterval);
     }
@@ -187,8 +190,7 @@
     modalContainer.style.cssText = `
             display: flex; position: fixed; z-index: 9999; left: 0; top: 0;
             width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.6);
-            backdrop-filter: blur(4px); justify-content: center; align-items: center;
-        `;
+            backdrop-filter: blur(4px); justify-content: center; align-items: center;`;
 
     modalContainer.addEventListener("click", (event) => {
       if (event.target === modalContainer) {
@@ -286,11 +288,8 @@
 
       createModal(paymentUrl, transactionRef);
       console.log(
-        `CeptaPay: Modal opened for transactionRef: ${transactionRef}.`
+        `CeptaPay: Modal opened for transactionRef: ${transactionRef}. Automatic status polling enabled.`
       );
-
-      // Polling is now expected to be handled by the client-side code
-      // (the HTML <script> block) using the exposed confirmStatus function.
     } catch (error) {
       console.error("CeptaPay: Payment initiation failed:", error.message);
       const fallbackRef =
@@ -305,7 +304,7 @@
   window.CeptaPay = {
     checkout: checkout,
     confirmStatus: handlePaymentStatus,
-    closeModal: () =>
-      triggerCallbackAndClose(paymentModalState.transactionRef, "close"),
+    closeModal: (eventType = "close") =>
+      triggerCallbackAndClose(paymentModalState.transactionRef, eventType),
   };
 })(window);
