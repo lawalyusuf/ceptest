@@ -3,6 +3,9 @@
 
   let paymentModalState = {
     transactionRef: null,
+    // pollInterval: null,
+    // consecutiveErrorCount: 0,
+    // MAX_POLLING_ERRORS: 10, //todo
     onClose: null,
     onSuccess: null,
     onFailed: null,
@@ -93,7 +96,7 @@
     const config = {
       method: method,
       headers: headers,
-      cache: "no-store",
+      cache: "no-store", // <-- important in browsers
     };
 
     if (data && method === "POST") {
@@ -134,8 +137,23 @@
       transactionRef
     )}&_t=${Date.now()}`; // cache-buster
     const response = await apiCall("GET", path, null);
-    return response;
+    return response; // <-- return { status, message, data }
   }
+
+  // async function handlePaymentStatus(transactionRef) {
+  //   const path = `/api/v1/pay/confirm-status?TransactionRef=${transactionRef}`;
+  //   const response = await apiCall("GET", path, null);
+
+  //   // if (response.data && paymentModalState.transactionRef === transactionRef) {
+  //   //   const status = response.data.status;
+  //   //   if (status === "Successful") {
+  //   //     triggerCallbackAndClose(response.data.transactionRef, "success");
+  //   //   } else if (status === "Failed") {
+  //   //     triggerCallbackAndClose(response.data.transactionRef, "failed");
+  //   //   }
+  //   // }
+  //   return response.data?.data;
+  // }
 
   function removeModal() {
     if (paymentModalState.ui.modalContainer) {
@@ -190,7 +208,8 @@
     modalContainer.style.cssText = `
             display: flex; position: fixed; z-index: 9999; left: 0; top: 0;
             width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.6);
-            backdrop-filter: blur(4px); justify-content: center; align-items: center;`;
+            backdrop-filter: blur(4px); justify-content: center; align-items: center;
+        `;
 
     modalContainer.addEventListener("click", (event) => {
       if (event.target === modalContainer) {
