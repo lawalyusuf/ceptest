@@ -203,7 +203,7 @@
   function createModal(paymentUrl, transactionRef) {
     removeModal();
     const modalContainer = document.createElement("div");
-    modalContainer.id = "ceptaPay_myModal";
+    modalContainer.id = "cepta_myModal";
     modalContainer.className = "cepta-modal";
     modalContainer.style.cssText = `
             display: flex; position: fixed; z-index: 9999; left: 0; top: 0;
@@ -271,7 +271,7 @@
 
     if (!config || !config.publicKey || !config.secretKey || !config.baseUrl) {
       console.error(
-        "CeptaPay: Missing required configuration keys (publicKey, secretKey, or baseUrl)."
+        "Cepta: Missing required configuration keys (publicKey, secretKey, or baseUrl)."
       );
       const fallbackRef =
         paymentModalState.transactionRef ||
@@ -290,7 +290,7 @@
     paymentModalState.config = config;
 
     try {
-      console.log("CeptaPay: Initiating payment...");
+      console.log("Cepta: Initiating payment...");
 
       const responseData = await handleInitiateApiData(paymentData);
 
@@ -307,10 +307,10 @@
 
       createModal(paymentUrl, transactionRef);
       console.log(
-        `CeptaPay: Modal opened for transactionRef: ${transactionRef}. Automatic status polling enabled.`
+        `Cepta: Modal opened for transactionRef: ${transactionRef}. Automatic status polling enabled.`
       );
     } catch (error) {
-      console.error("CeptaPay: Payment initiation failed:", error.message);
+      console.error("Cepta: Payment initiation failed:", error.message);
       const fallbackRef =
         paymentModalState.transactionRef ||
         paymentData?.transactionReference ||
@@ -320,7 +320,7 @@
     }
   }
 
-  window.CeptaPay = {
+  window.Cepta = {
     checkout: checkout,
     confirmStatus: handlePaymentStatus,
     closeModal: (eventType = "close") =>
